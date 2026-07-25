@@ -1,2 +1,5 @@
 * annex.backend=MD5E
 **/.git* annex.largefiles=nothing
+
+# Keep docs readable on GitHub (plain git, not annex pointers).
+*.md annex.largefiles=nothing
