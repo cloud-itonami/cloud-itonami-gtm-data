@@ -30,6 +30,11 @@ datalad drop 2026-07-25                # release local copy, keep the pointer
   kv-tenant-chunks/chunk-NNN.json# 634 per-tenant conns, pre-shaped for
                                  #   `wrangler kv bulk put` (key store:{org}/{repo},
                                  #   the shape cloud-itonami.edge.workspace-store reads)
+
+2026-07-27/
+  per-repo/<repo>.edn            # incremental addendum, NOT a fleet run.
+                                 #   Covers repos the 2026-07-25 run missed.
+                                 #   Currently: cloud-itonami-iso3166-chn
 ```
 
 ## Provenance (2026-07-25)
@@ -57,8 +62,31 @@ attempt. Both were **correctly held** by the real Campaign Governor for
 lacking a verified USDC deposit — no funding was fabricated to force them
 through (ADR-2607110100 defers real advertiser go-live deliberately).
 
+## Provenance (2026-07-27 addendum)
+
+Not a fleet run and not produced by the governed actor. One repo
+(`cloud-itonami-iso3166-chn`) researched by hand because the 2026-07-25
+run covered only **81 of 223** `iso3166-*` repos and China was not among
+them — the 22 occurrences of "China" in the 2026-07-25 summary are
+prospect *locations* in other verticals (Goertek, Danieli), not this
+repo's own GTM.
+
+Unlike the 2026-07-25 run, every `:source` here states **only what the
+fetched page actually confirmed**, and a page that could not be fetched
+is recorded as such rather than summarised anyway (the European
+Chamber's public-procurement study returned HTTP 405 to an automated
+fetch; nothing is claimed about its contents). The `:fit` rationale is
+still argument, not fact — review before any outreach, same as above.
+
+Written under superproject ADR-2607277000, alongside the two new CHN
+marketing-vertical repos (`cloud-itonami-iso3166-chn-advertising`,
+`cloud-itonami-iso3166-chn-market-research`).
+
 ## Known gaps
 
+- **iso3166 coverage is 81/223** in the 2026-07-25 run. The 2026-07-27
+  addendum closes exactly one of the 142 missing (CHN). The rest remain
+  ungenerated.
 - `:to` (a real recipient address) is **empty for all 634** — the sales
   lists carry organisation names and URLs, not contacts. Nothing can be
   sent as-is.
