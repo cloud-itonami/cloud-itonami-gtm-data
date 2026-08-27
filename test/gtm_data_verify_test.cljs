@@ -1,0 +1,216 @@
+(ns gtm-data-verify-test
+  "Fixture tests for the archive's invariant checks.
+
+  Each test hands one check a synthetic violation and asserts the *specific*
+  `:check` keyword comes back. Asserting only `(seq violations)` would count a
+  rejection that happened for some unrelated reason as proof the check works;
+  pinning the literal means that renaming a check, or having a fixture start
+  tripping a different check, is a failure here rather than a silent loss of
+  coverage.
+
+  The clean fixtures are asserted to produce **zero** violations first. A
+  check that fires on everything would otherwise pass every test below while
+  being useless.
+
+  These tests need no dataset content -- they run in a fresh clone. Measuring
+  the real archive is `bin/verify.cljs`, which refuses (exit 2) when the annex
+  content is absent rather than reporting a pass it did not earn.
+
+      nbb --classpath src:test test/gtm_data_verify_test.cljs"
+  (:require [gtm-data-verify :as gv]
+            [cljs.test :refer [deftest is testing run-tests] :as t]))
+
+(defn- checks
+  "The set of check keywords a run produced -- what the assertions pin."
+  [violations] (set (map :check violations)))
+
+;; ---------------------------------------------------------------------------
+;; clean fixtures: the smallest shape that satisfies every check
+;; ---------------------------------------------------------------------------
+
+(def clean-datoms
+  [[1 :itonami.effect/id "cloud-itonami/repo-a:marketing:outreach:Acme:1:effect"]
+   [1 :itonami.effect/kind :marketing.outreach]
+   [1 :itonami.effect/risk :external-send]
+   [1 :itonami.effect/status :proposed]
+   ;; the narrow exemption: a read-only registry write may be :done
+   [2 :itonami.effect/id "cloud-itonami/repo-a:adnetwork:summary:acme"]
+   [2 :itonami.effect/kind :knowledge.summarize]
+   [2 :itonami.effect/risk :read-only]
+   [2 :itonami.effect/status :done]])
+
+(def clean-summary
+  [{:repo "repo-a"
+    :sales-list [{:target "Acme" :url "https://acme.example" :source "acme.example about page"}]
+    :outreach {:target "Acme" :channel "email" :draft "Hi Acme --"}
+    :ad-strategy {:channels ["direct"] :budget-shape "none" :rationale "why"}
+    :ad-network {:advertiser "Acme" :governor-result :held
+                 :hold-reason "no verified prepaid USDC deposit"}}])
+
+(def clean-chunks [{"key" "store:cloud-itonami/repo-a" "value" "{}"}])
+
+(def clean-shards [{:stem "repo-a" :data {:repo "repo-a"}}])
+
+(def clean-cross
+  {:summary-repos ["repo-a"] :store-repos ["repo-a"]
+   :chunk-keys ["store:cloud-itonami/repo-a"]})
+
+(deftest clean-fixtures-produce-no-violations
+  (testing "a check that fires on everything would pass every test below"
+    (is (= [] (gv/check-store clean-datoms)))
+    (is (= [] (gv/check-summary clean-summary)))
+    (is (= [] (gv/check-chunks clean-chunks)))
+    (is (= [] (gv/check-cross clean-cross)))
+    (is (= [] (gv/check-shards clean-shards ["repo-a"])))))
+
+;; ---------------------------------------------------------------------------
+;; store
+;; ---------------------------------------------------------------------------
+
+(deftest an-approved-external-send-is-refused
+  (testing "the one that matters: nothing that can leave the building is past :proposed"
+    (let [approved (mapv (fn [[e a v]]
+                           (if (and (= e 1) (= a :itonami.effect/status)) [e a :done] [e a v]))
+                         clean-datoms)]
+      (is (contains? (checks (gv/check-store approved))
+                     :store/external-send-not-proposed)))))
+
+(deftest a-sent-external-effect-is-refused-under-any-status-name
+  (testing "the check names :proposed, not a blacklist of bad statuses"
+    (let [sent (mapv (fn [[e a v]]
+                       (if (and (= e 1) (= a :itonami.effect/status)) [e a :sent] [e a v]))
+                     clean-datoms)]
+      (is (contains? (checks (gv/check-store sent))
+                     :store/external-send-not-proposed)))))
+
+(deftest the-done-exemption-does-not-widen-past-read-only
+  (testing "a :done effect that could reach someone is refused"
+    (let [widened (mapv (fn [[e a v]]
+                          (if (and (= e 2) (= a :itonami.effect/risk)) [e a :external-send] [e a v]))
+                        clean-datoms)
+          got (checks (gv/check-store widened))]
+      (is (contains? got :store/done-effect-is-not-read-only))
+      ;; and it is caught by the primary check too -- belt and braces, stated
+      (is (contains? got :store/external-send-not-proposed)))))
+
+(deftest a-risk-class-nobody-reasoned-about-is-refused
+  (testing "an unknown risk is reported, not silently treated as safe"
+    (let [novel (mapv (fn [[e a v]]
+                        (if (and (= e 1) (= a :itonami.effect/risk)) [e a :wire-transfer] [e a v]))
+                      clean-datoms)]
+      (is (contains? (checks (gv/check-store novel)) :store/unknown-risk)))))
+
+(deftest an-empty-store-is-refused-rather-than-called-clean
+  (testing "zero effects must not return the same value as zero violations"
+    (is (contains? (checks (gv/check-store [])) :store/no-effects))
+    (is (contains? (checks (gv/check-store [[1 :itonami.repo/name "repo-a"]]))
+                   :store/no-effects))))
+
+;; ---------------------------------------------------------------------------
+;; summary
+;; ---------------------------------------------------------------------------
+
+(deftest an-addressed-outreach-is-refused
+  (testing "the archive must stay unsendable: no entry may carry a recipient"
+    (is (contains? (checks (gv/check-summary
+                            (assoc-in clean-summary [0 :outreach :to] "ops@acme.example")))
+                   :summary/outreach-is-addressed))))
+
+(deftest a-blank-recipient-is-not-treated-as-a-recipient
+  (testing "an empty :to is the documented state, not a violation"
+    (is (= [] (gv/check-summary (assoc-in clean-summary [0 :outreach :to] ""))))
+    (is (= [] (gv/check-summary (assoc-in clean-summary [0 :outreach :to] nil))))))
+
+(deftest an-entry-with-no-repo-key-is-refused
+  (testing "an unjoinable entry breaks every cross-file check downstream"
+    (is (contains? (checks (gv/check-summary (assoc-in clean-summary [0 :repo] nil)))
+                   :summary/missing-repo-key))))
+
+(deftest a-repo-appearing-twice-is-refused
+  (testing "the projection is one entry per repo"
+    (is (contains? (checks (gv/check-summary (conj clean-summary (first clean-summary))))
+                   :summary/duplicate-repo))))
+
+(deftest a-prospect-with-no-trace-is-refused
+  (testing "a name with neither a URL nor a source is the shape a fabrication takes"
+    (is (contains? (checks (gv/check-summary
+                            (assoc-in clean-summary [0 :sales-list]
+                                      [{:target "Ghost Industries"}])))
+                   :summary/target-without-attribution)))
+  (testing "and a source sentence alone is enough -- 25 real entries have no separate :url"
+    (is (= [] (gv/check-summary
+               (assoc-in clean-summary [0 :sales-list]
+                         [{:target "Acme" :source "named in the ICMA 2024 workbook"}]))))))
+
+(deftest a-campaign-that-was-not-held-is-refused
+  (testing "both real campaigns were held for lacking a verified deposit"
+    (doseq [result [:approved :live :launched]]
+      (is (contains? (checks (gv/check-summary
+                              (assoc-in clean-summary [0 :ad-network :governor-result] result)))
+                     :summary/ad-campaign-not-held)
+          (str "governor-result " result " must be refused")))))
+
+(deftest an-empty-summary-is-refused-rather-than-called-clean
+  (is (contains? (checks (gv/check-summary [])) :summary/no-entries)))
+
+;; ---------------------------------------------------------------------------
+;; kv chunks
+;; ---------------------------------------------------------------------------
+
+(deftest a-key-workspace-store-would-never-read-is-refused
+  (testing "the prefix and org segment are the contract with the edge worker"
+    (doseq [k ["cloud-itonami/repo-a" "store:other-org/repo-a" "store:cloud-itonami/" "repo-a"]]
+      (is (contains? (checks (gv/check-chunks [{"key" k "value" "{}"}]))
+                     :chunks/bad-key-shape)
+          (str "key " (pr-str k) " must be refused")))))
+
+(deftest a-duplicated-tenant-key-is-refused
+  (testing "a bulk put would silently overwrite one tenant with another"
+    (is (contains? (checks (gv/check-chunks (into clean-chunks clean-chunks)))
+                   :chunks/duplicate-key))))
+
+(deftest empty-chunks-are-refused-rather-than-called-clean
+  (is (contains? (checks (gv/check-chunks [])) :chunks/no-entries)))
+
+;; ---------------------------------------------------------------------------
+;; cross-file agreement
+;; ---------------------------------------------------------------------------
+
+(deftest a-partial-regeneration-is-refused
+  (testing "each file stays internally consistent, so only the join sees this"
+    (is (contains? (checks (gv/check-cross (assoc clean-cross :store-repos [])))
+                   :cross/summary-store-repo-mismatch))
+    (is (contains? (checks (gv/check-cross (assoc clean-cross :chunk-keys [])))
+                   :cross/summary-chunks-repo-mismatch))
+    (testing "and a repo staged in KV that the summary never mentions"
+      (is (contains? (checks (gv/check-cross
+                              (update clean-cross :chunk-keys conj "store:cloud-itonami/repo-b")))
+                     :cross/summary-chunks-repo-mismatch)))))
+
+;; ---------------------------------------------------------------------------
+;; per-repo shards
+;; ---------------------------------------------------------------------------
+
+(deftest a-shard-filed-under-the-wrong-name-is-refused
+  (is (contains? (checks (gv/check-shards [{:stem "repo-b" :data {:repo "repo-a"}}] ["repo-a" "repo-b"]))
+                 :shard/repo-name-mismatch)))
+
+(deftest a-shard-for-a-repo-the-summary-never-mentions-is-refused
+  (is (contains? (checks (gv/check-shards [{:stem "repo-z" :data {:repo "repo-z"}}] ["repo-a"]))
+                 :shard/not-in-summary)))
+
+;; ---------------------------------------------------------------------------
+;; exit-code discipline
+;; ---------------------------------------------------------------------------
+;;
+;; nbb's cljs.test runner exits 0 even when assertions fail (measured), so a
+;; CI step that only looked at `$?` would read a red suite as green. The exit
+;; code is set from the captured counters instead.
+
+(defonce ^:private counters (atom nil))
+(defmethod t/report [:cljs.test/default :end-run-tests] [m] (reset! counters m))
+
+(run-tests)
+
+(let [{:keys [fail error] :or {fail 0 error 0}} @counters]
+  (js/process.exit (if (pos? (+ fail error)) 1 0)))

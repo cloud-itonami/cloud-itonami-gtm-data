@@ -3,3 +3,16 @@
 
 # Keep docs readable on GitHub (plain git, not annex pointers).
 *.md annex.largefiles=nothing
+
+# Code stays in plain git too, and for a sharper reason than the docs above.
+# The test suite exists to be runnable in a fresh clone -- the case where the
+# annex content is absent and `bin/verify.cljs` must refuse rather than report
+# a pass. An annexed checker is a dangling symlink in exactly that clone, so
+# annexing it would disarm it precisely where it matters.
+#
+# Measured both ways with `datalad save` (the tool this dataset is maintained
+# with; a plain `git add` annexes nothing here and so proves nothing): without
+# these three lines a test/*.cljs lands as mode 120000, with them as 100644.
+src/** annex.largefiles=nothing
+test/** annex.largefiles=nothing
+bin/** annex.largefiles=nothing
