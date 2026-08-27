@@ -1,0 +1,103 @@
+(ns verify
+  "Run the archive's invariant checks against the real dataset.
+
+      nbb --classpath src bin/verify.cljs [<dataset-root>]
+
+  Exit codes are three-valued on purpose:
+
+      0   scanned, and every check passed
+      1   a check found a violation
+      2   REFUSED -- the content needed to answer was not present
+
+  Two is the whole point. The content of this dataset lives in git-annex on
+  Backblaze B2, so a fresh clone has the pointers but not the bytes, and a
+  checker that reported `0 violations` there would be reporting the strongest
+  possible pass on nothing at all. That failure -- an inspection that could
+  not run returning the same value as an inspection that ran and found
+  nothing -- is the one the superproject CLAUDE.md has caught fourteen times
+  in a day; it is not repeated here.
+
+  Coverage is printed unconditionally, including when it is partial, so that
+  `SCANNED` can never be mistaken for `ALL`."
+  (:require [gtm-data-verify :as gv]
+            [clojure.edn :as edn]
+            [clojure.string :as str]
+            ["fs" :as fs]
+            ["path" :as path]))
+
+(def root (or (first (remove #(str/starts-with? % "--") *command-line-args*))
+              "."))
+
+(def store-path   "2026-07-25/fleet-sales-ads-store.edn")
+(def summary-path "2026-07-25/fleet-sales-ads-summary.edn")
+(def chunk-dir    "2026-07-25/kv-tenant-chunks")
+(def shard-dirs   ["2026-07-25/per-repo" "2026-07-27/per-repo"])
+
+(defn- readable?
+  "An annex pointer whose content is absent is a dangling symlink: it is
+  listed by git, `test -e` fails, and reading it throws. Absent is not empty."
+  [p] (try (boolean (fs/statSync p)) (catch :default _ false)))
+
+(defn- slurp-edn [p] (edn/read-string (fs/readFileSync p "utf8")))
+
+(defn- ls [dir suffix]
+  (if (try (.isDirectory (fs/statSync dir)) (catch :default _ false))
+    (->> (fs/readdirSync dir) (filter #(str/ends-with? % suffix)) sort vec)
+    []))
+
+(defn- report! [label violations]
+  (doseq [{:keys [check where detail]} violations]
+    (println (str "  VIOLATION " check " @ " where " -- " detail)))
+  (println (str label ": " (count violations) " violation(s)")))
+
+(defn -main []
+  (let [store-file   (path/join root store-path)
+        summary-file (path/join root summary-path)
+        refusals     (cond-> []
+                       (not (readable? store-file))   (conj store-path)
+                       (not (readable? summary-file)) (conj summary-path))]
+    (if (seq refusals)
+      (do
+        (println "REFUSED: dataset content is not present locally.")
+        (doseq [f refusals] (println (str "  missing content: " f)))
+        (println "Fetch it first:  datalad get 2026-07-25")
+        (println "Refusing to report a pass on content this run could not read.")
+        (js/process.exit 2))
+      (let [store    (slurp-edn store-file)
+            datoms   (get-in store [:db :datoms])
+            summary  (slurp-edn summary-file)
+            chunk-fs (ls (path/join root chunk-dir) ".json")
+            chunks   (vec (mapcat (fn [f]
+                                    (js->clj (js/JSON.parse
+                                              (fs/readFileSync (path/join root chunk-dir f) "utf8"))))
+                                  chunk-fs))
+            ;; Shards are the one group we tolerate reading partially, because
+            ;; they are per-tenant copies of what the summary already carries.
+            ;; Present and absent are counted separately and both are printed.
+            listed   (vec (mapcat (fn [d] (map #(vector d %) (ls (path/join root d) ".edn")))
+                                  shard-dirs))
+            present  (filterv (fn [[d f]] (readable? (path/join root d f))) listed)
+            shards   (mapv (fn [[d f]]
+                             {:stem (str/replace f #"\.edn$" "")
+                              :data (slurp-edn (path/join root d f))})
+                           present)
+            summary-repos (keep :repo summary)
+            store-repos   (->> (gv/store-effects datoms) (keep :itonami.effect/id) (keep #(second (re-matches #"^cloud-itonami/([^:]+):.*$" (str %)))))
+            all (concat (gv/check-store datoms)
+                        (gv/check-summary summary)
+                        (gv/check-chunks chunks)
+                        (gv/check-cross {:summary-repos summary-repos
+                                         :store-repos store-repos
+                                         :chunk-keys (map #(get % "key") chunks)})
+                        (gv/check-shards shards summary-repos))]
+        (println (str "SCANNED\tstore-effects=" (count (gv/store-effects datoms))
+                      "\tsummary-entries=" (count summary)
+                      "\tkv-entries=" (count chunks) " (" (count chunk-fs) " chunk files)"))
+        (println (str "COVERAGE\tper-repo shards read " (count present) "/" (count listed)
+                      (when (< (count present) (count listed))
+                        (str " -- " (- (count listed) (count present))
+                             " shard(s) not fetched; their invariants are UNMEASURED, not clean"))))
+        (report! "RESULT" all)
+        (js/process.exit (if (seq all) 1 0))))))
+
+(-main)

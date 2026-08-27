@@ -41,13 +41,24 @@ datalad drop 2026-07-25                # release local copy, keep the pointer
 
 Produced by real calls into `gftdcojp/cloud-itonami`'s existing governed
 actor — `cloud-itonami.marketing/propose-outreach!` and
-`propose-copy-suggestion!` — not hand-written. Every record is
-`:status :proposed` / `:risk :external-send`: **nothing here has been
-approved or sent.**
+`propose-copy-suggestion!` — not hand-written. All 634 `:external-send`
+effects are `:status :proposed`: **nothing here has been approved or sent.**
 
-Prospect organisations were gathered by live web research, each with a
-source URL. **No fabricated names** — agents were instructed to report
-fewer targets rather than invent any. A 40-URL random sample checked
+The store holds 1,270 effects, not 634, and the earlier blanket phrasing here
+("every record is `:status :proposed` / `:risk :external-send`") was wrong on
+both halves — 636 of them are `:read-only`, and two of those are
+legitimately `:done`: the advertiser-registry summaries for the two ad
+verticals, which wrote to a registry rather than to anyone. `bin/verify.cljs`
+now pins the accurate invariant instead, which is also the stronger one:
+*no effect that can leave the building is past `:proposed`*.
+
+Prospect organisations were gathered by live web research, each with an
+attribution. **No fabricated names** — agents were instructed to report
+fewer targets rather than invent any. 1,854 of the 1,879 prospects carry a
+`:url`; the remaining 25 carry only a `:source` sentence naming where the
+organisation was found, and 2 carry a `:url` with no `:source`. None carries
+neither — that is the shape a fabrication would take, and it is what
+`bin/verify.cljs` refuses. A 40-URL random sample checked
 2026-07-25 returned 38×200 OK, 1 wrong TLD (`ibstock.com` →
 `ibstock.co.uk`) and 1 real-but-down host (`mcra.gov.gh`).
 
@@ -81,6 +92,39 @@ still argument, not fact — review before any outreach, same as above.
 Written under superproject ADR-2607277000, alongside the two new CHN
 marketing-vertical repos (`cloud-itonami-iso3166-chn-advertising`,
 `cloud-itonami-iso3166-chn-market-research`).
+
+## Verifying
+
+```bash
+nbb --classpath src:test test/gtm_data_verify_test.cljs   # checks, on fixtures
+nbb --classpath src bin/verify.cljs .                     # checks, on this archive
+```
+
+The first needs no content and runs in a fresh clone: it hands each check a
+synthetic violation and asserts that check's own name comes back, so a check
+that quietly stopped biting is a failure rather than a silent gap.
+
+The second is three-valued, and the third value is the point:
+
+| exit | meaning |
+|---|---|
+| 0 | scanned, and every check passed |
+| 1 | a check found a violation |
+| 2 | **REFUSED** — the content needed to answer was not present |
+
+Because the content lives in git-annex on B2, a fresh clone has the pointers
+and not the bytes. A checker that printed `0 violations` there would be
+reporting the strongest possible pass on nothing at all, so it refuses
+instead. Partial coverage is likewise printed rather than rounded up — a
+run that reads 88 of the 625 per-repo shards says so, and calls the other 537
+`UNMEASURED, not clean`.
+
+What it pins: no `:external-send` effect is past `:proposed`; no entry carries
+a recipient; no prospect appears without either a URL or a source sentence;
+both ad campaigns are still `:held`; and the summary, the store and the KV
+chunks describe the same 634 tenants — the last of which is the only place
+a partial regeneration shows up, since each file stays internally consistent
+on its own.
 
 ## Known gaps
 

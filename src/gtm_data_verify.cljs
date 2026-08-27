@@ -1,0 +1,230 @@
+(ns gtm-data-verify
+  "Invariant checks for the cloud-itonami GTM archive.
+
+  Why this exists
+  ===============
+  This dataset carries 634 tenants' worth of *unsent* outreach drafts. Its
+  README states three safety properties in prose:
+
+    * nothing here has been approved or sent,
+    * `:to` (a real recipient address) is empty for all of them,
+    * the two ad campaigns were held by the Campaign Governor, not forced
+      through with a fabricated deposit.
+
+  Prose rots silently. Until this namespace existed nothing checked any of
+  the three, so a regenerating run -- or a hand edit -- could have flipped a
+  status, filled in a recipient, or recorded a campaign as approved, and the
+  archive would still have looked exactly the same from the outside.
+
+  Everything here is a pure function from already-parsed data to a vector of
+  violations. I/O lives in `bin/verify.cljs`; the point of the split is that
+  `test/gtm_data_verify_test.cljs` can hand each check a synthetic violation
+  and prove it rejects **for its own stated reason** -- a test that only
+  asserts `(seq violations)` counts a rejection that happened for some other
+  reason as a success (superproject CLAUDE.md, `検査を書く前・緑を信じる前の 6 問`,
+  question 6).
+
+  A violation is `{:check <keyword> :where <string> :detail <string>}`. The
+  `:check` keyword is the contract: fixtures pin the literal, so renaming one
+  is a test failure rather than a silent loss of coverage."
+  (:require [clojure.string :as str]))
+
+;; ---------------------------------------------------------------------------
+;; vocabulary
+;; ---------------------------------------------------------------------------
+
+(def known-risks
+  "The risk classes the governed marketing/adnetwork actors emit. A risk
+  outside this set means an effect kind nobody here has reasoned about, so it
+  is reported rather than ignored -- an unknown class is not a safe class."
+  #{:external-send :read-only})
+
+(def tenant-key-re
+  "`wrangler kv bulk put` key shape that `cloud-itonami.edge.workspace-store`
+  reads back. Anything else is staged data that will never be found again."
+  #"^store:cloud-itonami/[a-z0-9][a-z0-9._-]*$")
+
+(defn- v [check where detail]
+  {:check check :where where :detail detail})
+
+;; ---------------------------------------------------------------------------
+;; store — the governed activity log (fleet-sales-ads-store.edn)
+;; ---------------------------------------------------------------------------
+
+(defn store-effects
+  "Collapse the flat `[e a v]` datom vector into one map per effect entity.
+  The store is a serialised DataScript conn; we deliberately do not pull in
+  DataScript to read it, because a checker that needs the same library that
+  wrote the file cannot detect a file the library can no longer read."
+  [datoms]
+  (->> datoms
+       (reduce (fn [m [e a val]] (update m e assoc a val)) {})
+       vals
+       (filterv #(contains? % :itonami.effect/status))))
+
+(defn check-store
+  "Invariants over the governed effect log."
+  [datoms]
+  (let [effects (store-effects datoms)]
+    (if (empty? effects)
+      ;; Evidence floor. Without this an empty or unparsed store is
+      ;; indistinguishable from a store in which every effect is well-formed,
+      ;; and the caller would report the strongest possible pass on no data.
+      [(v :store/no-effects "fleet-sales-ads-store.edn"
+          "no effect entities found; refusing to report the store as clean")]
+      (into
+       []
+       (concat
+        ;; The one that matters. `:external-send` is the class of effect that
+        ;; can leave the building; every one of them must still be awaiting a
+        ;; human. This is stated more narrowly than the README's blanket
+        ;; "nothing is approved" because that blanket claim is false: two
+        ;; read-only advertiser-registry summaries are legitimately `:done`.
+        (for [e effects
+              :when (and (= :external-send (:itonami.effect/risk e))
+                         (not= :proposed (:itonami.effect/status e)))]
+          (v :store/external-send-not-proposed
+             (str (:itonami.effect/id e))
+             (str "external-send effect has status "
+                  (pr-str (:itonami.effect/status e))
+                  ", expected :proposed")))
+        ;; A `:done` effect is only ever acceptable when it could not reach
+        ;; anyone. Guards the exemption above from widening by accident.
+        (for [e effects
+              :when (and (= :done (:itonami.effect/status e))
+                         (not= :read-only (:itonami.effect/risk e)))]
+          (v :store/done-effect-is-not-read-only
+             (str (:itonami.effect/id e))
+             (str "effect is :done with risk "
+                  (pr-str (:itonami.effect/risk e))
+                  "; only :read-only effects may be :done")))
+        (for [e effects
+              :when (not (known-risks (:itonami.effect/risk e)))]
+          (v :store/unknown-risk
+             (str (:itonami.effect/id e))
+             (str "risk " (pr-str (:itonami.effect/risk e))
+                  " is outside " (pr-str known-risks)))))))))
+
+;; ---------------------------------------------------------------------------
+;; summary — the human-readable projection (fleet-sales-ads-summary.edn)
+;; ---------------------------------------------------------------------------
+
+(defn check-summary
+  "Invariants over the 634-entry projection."
+  [entries]
+  (if (empty? entries)
+    [(v :summary/no-entries "fleet-sales-ads-summary.edn"
+        "no entries found; refusing to report the summary as clean")]
+    (into
+     []
+     (concat
+      ;; Nothing in this archive is addressed to anybody. The sales lists
+      ;; carry organisation names and URLs, never a recipient -- which is
+      ;; what makes the whole archive unsendable as it stands.
+      (for [e entries
+            :let [to (get-in e [:outreach :to])]
+            :when (and (some? to) (not (str/blank? (str to))))]
+        (v :summary/outreach-is-addressed (str (:repo e))
+           (str "outreach carries a recipient " (pr-str to)
+                "; this archive must not be addressable")))
+      (for [e entries :when (str/blank? (str (:repo e)))]
+        (v :summary/missing-repo-key "(entry without :repo)"
+           "entry has no :repo, so it cannot be joined to the store or the KV chunks"))
+      (for [[repo n] (frequencies (keep :repo entries)) :when (> n 1)]
+        (v :summary/duplicate-repo (str repo)
+           (str "appears " n " times; the projection is one entry per repo")))
+      ;; A prospect with neither a URL nor a source sentence is a bare name.
+      ;; The run was instructed to report fewer targets rather than invent
+      ;; any, so a traceless name is the shape a fabrication would take.
+      (for [e entries
+            s (:sales-list e)
+            :when (and (str/blank? (str (:url s)))
+                       (str/blank? (str (:source s))))]
+        (v :summary/target-without-attribution (str (:repo e))
+           (str "prospect " (pr-str (:target s))
+                " carries neither :url nor :source")))
+      ;; Both advertising verticals attempted a real campaign and both were
+      ;; held for lacking a verified USDC deposit. A `:held` that became
+      ;; anything else would mean a deposit was fabricated to force go-live.
+      (for [e entries
+            :let [an (:ad-network e)]
+            :when (and (map? an) (not= :held (:governor-result an)))]
+        (v :summary/ad-campaign-not-held (str (:repo e))
+           (str "governor-result is " (pr-str (:governor-result an))
+                ", expected :held")))))))
+
+;; ---------------------------------------------------------------------------
+;; kv chunks — staged tenant conns (kv-tenant-chunks/chunk-NNN.json)
+;; ---------------------------------------------------------------------------
+
+(defn check-chunks
+  "`entries` is the concatenation of every chunk, each `{\"key\" ... \"value\" ...}`."
+  [entries]
+  (if (empty? entries)
+    [(v :chunks/no-entries "kv-tenant-chunks/"
+        "no KV entries found; refusing to report the chunks as clean")]
+    (let [ks (mapv #(get % "key") entries)]
+      (into
+       []
+       (concat
+        (for [k ks :when (not (re-matches tenant-key-re (str k)))]
+          (v :chunks/bad-key-shape (str k)
+             "key does not match store:cloud-itonami/<repo>; workspace-store would never read it"))
+        (for [[k n] (frequencies ks) :when (> n 1)]
+          (v :chunks/duplicate-key (str k)
+             (str "appears " n " times across the chunks; a bulk put would overwrite itself"))))))))
+
+;; ---------------------------------------------------------------------------
+;; cross-file agreement
+;; ---------------------------------------------------------------------------
+
+(defn- chunk-key->repo [k]
+  (some-> (re-matches #"^store:cloud-itonami/(.+)$" (str k)) second))
+
+(defn check-cross
+  "The three fleet-wide files must describe the same 634 tenants. A partial
+  regeneration -- the failure mode this dataset has already had once, when a
+  run covered 81 of 223 iso3166 repos -- shows up here and nowhere else,
+  because each file is internally consistent on its own."
+  [{:keys [summary-repos store-repos chunk-keys]}]
+  (let [chunk-repos (set (keep chunk-key->repo chunk-keys))
+        s (set summary-repos)
+        st (set store-repos)
+        describe (fn [check other-name other]
+                   (let [missing (sort (remove other s))
+                         extra   (sort (remove s other))]
+                     (when (or (seq missing) (seq extra))
+                       [(v check other-name
+                           (str "summary has " (count s) " repos, " other-name " has " (count other)
+                                "; only in summary: " (pr-str (vec (take 5 missing)))
+                                (when (> (count missing) 5) (str " (+" (- (count missing) 5) " more)"))
+                                "; only in " other-name ": " (pr-str (vec (take 5 extra)))
+                                (when (> (count extra) 5) (str " (+" (- (count extra) 5) " more)"))))])))]
+    (into [] (concat (describe :cross/summary-store-repo-mismatch "store" st)
+                     (describe :cross/summary-chunks-repo-mismatch "kv-tenant-chunks" chunk-repos)))))
+
+;; ---------------------------------------------------------------------------
+;; per-repo shards
+;; ---------------------------------------------------------------------------
+
+(defn check-shards
+  "`shards` is `[{:stem <filename without .edn> :data <parsed record>} ...]`,
+  containing only the shards whose annex content is actually present. The
+  caller is responsible for reporting how many were absent -- this function
+  cannot tell the difference between a small dataset and a large one that was
+  mostly not fetched, so it must not be asked to."
+  [shards summary-repos]
+  (let [s (set summary-repos)]
+    (into
+     []
+     (concat
+      (for [{:keys [stem data]} shards
+            :when (not= stem (str (:repo data)))]
+        (v :shard/repo-name-mismatch stem
+           (str "file is named " (pr-str stem) " but its :repo is "
+                (pr-str (:repo data)))))
+      (for [{:keys [stem data]} shards
+            :when (and (seq s) (not (s (str (:repo data)))))]
+        (v :shard/not-in-summary stem
+           (str ":repo " (pr-str (:repo data))
+                " has no entry in the fleet summary")))))))
