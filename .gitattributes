@@ -6,7 +6,7 @@
 
 # Code stays in plain git too, and for a sharper reason than the docs above.
 # The test suite exists to be runnable in a fresh clone -- the case where the
-# annex content is absent and `bin/verify.cljs` must refuse rather than report
+# annex content is absent and `bin/verify.kotoba` must refuse rather than report
 # a pass. An annexed checker is a dangling symlink in exactly that clone, so
 # annexing it would disarm it precisely where it matters.
 #
