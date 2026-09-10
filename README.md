@@ -48,7 +48,7 @@ The store holds 1,270 effects, not 634, and the earlier blanket phrasing here
 ("every record is `:status :proposed` / `:risk :external-send`") was wrong on
 both halves — 636 of them are `:read-only`, and two of those are
 legitimately `:done`: the advertiser-registry summaries for the two ad
-verticals, which wrote to a registry rather than to anyone. `bin/verify.cljs`
+verticals, which wrote to a registry rather than to anyone. `bin/verify.kotoba`
 now pins the accurate invariant instead, which is also the stronger one:
 *no effect that can leave the building is past `:proposed`*.
 
@@ -58,7 +58,7 @@ fewer targets rather than invent any. 1,854 of the 1,879 prospects carry a
 `:url`; the remaining 25 carry only a `:source` sentence naming where the
 organisation was found, and 2 carry a `:url` with no `:source`. None carries
 neither — that is the shape a fabrication would take, and it is what
-`bin/verify.cljs` refuses. A 40-URL random sample checked
+`bin/verify.kotoba` refuses. A 40-URL random sample checked
 2026-07-25 returned 38×200 OK, 1 wrong TLD (`ibstock.com` →
 `ibstock.co.uk`) and 1 real-but-down host (`mcra.gov.gh`).
 
@@ -96,8 +96,8 @@ marketing-vertical repos (`cloud-itonami-iso3166-chn-advertising`,
 ## Verifying
 
 ```bash
-nbb --classpath src:test test/gtm_data_verify_test.cljs   # checks, on fixtures
-nbb --classpath src bin/verify.cljs .                     # checks, on this archive
+nbb --classpath src:test test/gtm_data_verify_test.kotoba   # checks, on fixtures
+nbb --classpath src bin/verify.kotoba .                     # checks, on this archive
 ```
 
 The first needs no content and runs in a fresh clone: it hands each check a
