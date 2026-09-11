@@ -16,7 +16,7 @@
   the real archive is `bin/verify.cljs`, which refuses (exit 2) when the annex
   content is absent rather than reporting a pass it did not earn.
 
-      nbb --classpath src:test test/gtm_data_verify_test.cljs"
+      kbb --backend sci --classpath src:test test/gtm_data_verify_test.cljs"
   (:require [gtm-data-verify :as gv]
             [cljs.test :refer [deftest is testing run-tests] :as t]))
 

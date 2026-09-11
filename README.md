@@ -96,8 +96,8 @@ marketing-vertical repos (`cloud-itonami-iso3166-chn-advertising`,
 ## Verifying
 
 ```bash
-nbb --classpath src:test test/gtm_data_verify_test.kotoba   # checks, on fixtures
-nbb --classpath src bin/verify.kotoba .                     # checks, on this archive
+kbb --backend sci --classpath src:test test/gtm_data_verify_test.kotoba   # checks, on fixtures
+kbb --backend sci --classpath src bin/verify.kotoba .                     # checks, on this archive
 ```
 
 The first needs no content and runs in a fresh clone: it hands each check a
