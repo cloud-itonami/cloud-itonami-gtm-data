@@ -17,8 +17,8 @@
   archive would still have looked exactly the same from the outside.
 
   Everything here is a pure function from already-parsed data to a vector of
-  violations. I/O lives in `bin/verify.cljs`; the point of the split is that
-  `test/gtm_data_verify_test.cljs` can hand each check a synthetic violation
+  violations. I/O lives in `bin/verify.cljk`; the point of the split is that
+  `test/gtm_data_verify_test.cljk` can hand each check a synthetic violation
   and prove it rejects **for its own stated reason** -- a test that only
   asserts `(seq violations)` counts a rejection that happened for some other
   reason as a success (superproject CLAUDE.md, `検査を書く前・緑を信じる前の 6 問`,

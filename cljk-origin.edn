@@ -1,0 +1,8 @@
+{:format :kotoba.cljk-origin/v1
+ :renamed-on "2026-09-25"
+ :decision "adr-2609111500-cljk-rename-all-clojure-source (com-junkawasaki/root 90-docs/adr; owner instruction 2026-09-11). This repo was renamed .cljs -> .kotoba on 2026-09-10 and missed the 2026-09-11 wave; the kbb engine does not resolve .kotoba namespaces, so the documented verify commands died with `Could not find namespace: gtm-data-verify`."
+ :rule "value = the extension the file had before the rename. A path ending in .clj.cljk or .cljs.cljk kept it in the name because both platform files existed (or the plain target was taken)."
+ :origins
+ {"src/gtm_data_verify.cljk" ".cljs"
+  "test/gtm_data_verify_test.cljk" ".cljs"
+  "bin/verify.cljk" ".cljs"}}

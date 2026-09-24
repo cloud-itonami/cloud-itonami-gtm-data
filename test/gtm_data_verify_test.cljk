@@ -13,10 +13,10 @@
   being useless.
 
   These tests need no dataset content -- they run in a fresh clone. Measuring
-  the real archive is `bin/verify.cljs`, which refuses (exit 2) when the annex
+  the real archive is `bin/verify.cljk`, which refuses (exit 2) when the annex
   content is absent rather than reporting a pass it did not earn.
 
-      kbb --backend sci --classpath src:test test/gtm_data_verify_test.cljs"
+      kbb --backend sci --classpath src:test test/gtm_data_verify_test.cljk"
   (:require [gtm-data-verify :as gv]
             [cljs.test :refer [deftest is testing run-tests] :as t]))
 
