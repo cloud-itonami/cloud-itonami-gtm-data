@@ -6,7 +6,7 @@
 
 # Code stays in plain git too, and for a sharper reason than the docs above.
 # The test suite exists to be runnable in a fresh clone -- the case where the
-# annex content is absent and `bin/verify.kotoba` must refuse rather than report
+# annex content is absent and `bin/verify.cljk` must refuse rather than report
 # a pass. An annexed checker is a dangling symlink in exactly that clone, so
 # annexing it would disarm it precisely where it matters.
 #
@@ -16,3 +16,8 @@
 src/** annex.largefiles=nothing
 test/** annex.largefiles=nothing
 bin/** annex.largefiles=nothing
+
+# The rename manifest the kbb engine reads to resolve the .cljk sources above.
+# Annexed, it would be a dangling symlink in a fresh clone and every `require`
+# of gtm-data-verify would be refused there.
+cljk-origin.edn annex.largefiles=nothing

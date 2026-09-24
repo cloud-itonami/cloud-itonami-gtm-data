@@ -1,7 +1,7 @@
 (ns verify
   "Run the archive's invariant checks against the real dataset.
 
-      kbb --backend sci --classpath src bin/verify.cljs [<dataset-root>]
+      kbb --backend sci --classpath src bin/verify.cljk [<dataset-root>]
 
   Exit codes are three-valued on purpose:
 
