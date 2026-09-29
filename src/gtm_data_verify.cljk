@@ -21,7 +21,7 @@
   `test/gtm_data_verify_test.cljk` can hand each check a synthetic violation
   and prove it rejects **for its own stated reason** -- a test that only
   asserts `(seq violations)` counts a rejection that happened for some other
-  reason as a success (superproject CLAUDE.md, `検査を書く前・緑を信じる前の 6 問`,
+  reason as a success (superproject AGENTS.md, `検査を書く前・緑を信じる前の 6 問`,
   question 6).
 
   A violation is `{:check <keyword> :where <string> :detail <string>}`. The
