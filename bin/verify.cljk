@@ -14,7 +14,7 @@
   checker that reported `0 violations` there would be reporting the strongest
   possible pass on nothing at all. That failure -- an inspection that could
   not run returning the same value as an inspection that ran and found
-  nothing -- is the one the superproject CLAUDE.md has caught fourteen times
+  nothing -- is the one the superproject AGENTS.md has caught fourteen times
   in a day; it is not repeated here.
 
   Coverage is printed unconditionally, including when it is partial, so that
